@@ -17,20 +17,17 @@ st.title("📊 Customer Segmentation using RFM & K-Means")
 st.subheader("📋 Required Dataset Format")
 
 st.markdown("""
-Your dataset must contain the following columns:
-
-- **CustomerID** → Unique ID for each customer  
-- **InvoiceNo** → Transaction ID  
-- **InvoiceDate** → Date of purchase  
-- **Quantity** → Number of items purchased  
-- **UnitPrice** → Price per item  
+Your dataset must contain:
+- CustomerID
+- InvoiceNo
+- InvoiceDate
+- Quantity
+- UnitPrice
 """)
 
 # =========================
-# SAMPLE DATASET GENERATION
+# SAMPLE DATA
 # =========================
-st.subheader("📥 Download Sample Dataset")
-
 @st.cache_data
 def create_sample_data():
     data = {
@@ -43,53 +40,24 @@ def create_sample_data():
     return pd.DataFrame(data)
 
 sample_df = create_sample_data()
-
-st.write("📌 Example Preview:")
 st.dataframe(sample_df.head())
-
-sample_csv = sample_df.to_csv(index=False).encode('utf-8')
-st.download_button(
-    label="📥 Download Full Sample Dataset",
-    data=sample_csv,
-    file_name="sample_customer_data.csv",
-    mime='text/csv'
-)
-
-# =========================
-# CACHE FUNCTION
-# =========================
-@st.cache_data
-def load_data(file):
-    if file.name.endswith('.csv'):
-        return pd.read_csv(file, encoding='ISO-8859-1')
-    else:
-        return pd.read_excel(file)
 
 # =========================
 # FILE UPLOAD
 # =========================
-file = st.file_uploader("Upload your dataset (CSV or Excel)", type=["csv", "xlsx"])
+file = st.file_uploader("Upload dataset", type=["csv", "xlsx"])
 
 if file is not None:
 
-    try:
-        df = load_data(file)
-    except Exception as e:
-        st.error(f"Error reading file: {e}")
-        st.stop()
+    df = pd.read_csv(file, encoding='ISO-8859-1') if file.name.endswith('.csv') else pd.read_excel(file)
 
     # =========================
-    # VALIDATE COLUMNS
+    # VALIDATION
     # =========================
     required_columns = ['CustomerID', 'InvoiceNo', 'InvoiceDate', 'Quantity', 'UnitPrice']
-    missing_cols = [col for col in required_columns if col not in df.columns]
-
-    if missing_cols:
-        st.error(f"❌ Missing required columns: {missing_cols}")
+    if not all(col in df.columns for col in required_columns):
+        st.error("Missing required columns!")
         st.stop()
-
-    st.subheader("🔹 Raw Data Preview")
-    st.dataframe(df.head())
 
     # =========================
     # PREPROCESSING
@@ -113,7 +81,9 @@ if file is not None:
 
     rfm.columns = ['Recency', 'Frequency', 'Monetary']
 
-    # Remove outliers
+    # =========================
+    # REMOVE OUTLIERS
+    # =========================
     rfm = rfm[
         (rfm['Monetary'] < rfm['Monetary'].quantile(0.99)) &
         (rfm['Frequency'] < rfm['Frequency'].quantile(0.99))
@@ -138,10 +108,8 @@ if file is not None:
     rfm_scaled = scaler.fit_transform(rfm[['Recency','Frequency','Monetary']])
 
     # =========================
-    # AUTO SELECT BEST K
+    # FIND BEST K
     # =========================
-    st.subheader("🔹 Silhouette Scores")
-
     scores = {}
     best_k = 2
     best_score = -1
@@ -156,8 +124,8 @@ if file is not None:
             best_score = score
             best_k = k
 
-    st.write(scores)
-    st.success(f"✅ Best K selected: {best_k}")
+    st.write("Silhouette Scores:", scores)
+    st.success(f"Best K: {best_k}")
 
     # =========================
     # FINAL MODEL
@@ -166,19 +134,21 @@ if file is not None:
     rfm['Cluster'] = kmeans.fit_predict(rfm_scaled)
 
     # =========================
-    # SEGMENT NAMING
+    # FINAL SEGMENTATION (YOUR REQUIREMENT)
     # =========================
     def segment_customer(row):
+
         if row['RFM_Score'] >= 13:
-            return "🌟 Champions"
-        elif row['RFM_Score'] >= 10:
-            return "💎 Loyal Customers"
-        elif row['RFM_Score'] >= 7:
-            return "🙂 Potential Loyalists"
+            return "Loyal High-Spenders"
+
+        elif row['RFM_Score'] >= 9:
+            return "Regular Customers"
+
         elif row['RFM_Score'] >= 5:
-            return "⚠️ At Risk"
+            return "New/Occasional Customers"
+
         else:
-            return "❌ Lost Customers"
+            return "At-Risk Infrequents"
 
     rfm['Segment'] = rfm.apply(segment_customer, axis=1)
 
@@ -193,7 +163,7 @@ if file is not None:
     col3.metric("Best K", best_k)
 
     # =========================
-    # VISUALIZATIONS
+    # VISUALS
     # =========================
     st.subheader("📊 Visual Insights")
 
@@ -217,10 +187,10 @@ if file is not None:
     st.dataframe(rfm.head())
 
     # =========================
-    # DOWNLOAD RESULT
+    # DOWNLOAD
     # =========================
     csv = rfm.to_csv().encode('utf-8')
-    st.download_button("📥 Download Segmented Data", csv, "customer_segments.csv")
+    st.download_button("Download CSV", csv, "customer_segments.csv")
 
 else:
-    st.info("Please upload a dataset to begin.")
+    st.info("Upload a dataset to start")
