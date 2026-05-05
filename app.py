@@ -12,7 +12,51 @@ st.set_page_config(page_title="Customer Segmentation", layout="wide")
 st.title("📊 Customer Segmentation using RFM & K-Means")
 
 # =========================
-# CACHE (Performance)
+# REQUIRED FORMAT DISPLAY
+# =========================
+st.subheader("📋 Required Dataset Format")
+
+st.markdown("""
+Your dataset must contain the following columns:
+
+- **CustomerID** → Unique ID for each customer  
+- **InvoiceNo** → Transaction ID  
+- **InvoiceDate** → Date of purchase  
+- **Quantity** → Number of items purchased  
+- **UnitPrice** → Price per item  
+""")
+
+# =========================
+# SAMPLE DATASET GENERATION
+# =========================
+st.subheader("📥 Download Sample Dataset")
+
+@st.cache_data
+def create_sample_data():
+    data = {
+        "CustomerID": np.random.choice(range(10000, 10050), 200),
+        "InvoiceNo": np.random.choice([f"INV{i}" for i in range(1000,1100)], 200),
+        "InvoiceDate": pd.date_range(start="2024-01-01", periods=200, freq="D"),
+        "Quantity": np.random.randint(1, 10, 200),
+        "UnitPrice": np.random.uniform(50, 500, 200).round(2)
+    }
+    return pd.DataFrame(data)
+
+sample_df = create_sample_data()
+
+st.write("📌 Example Preview:")
+st.dataframe(sample_df.head())
+
+sample_csv = sample_df.to_csv(index=False).encode('utf-8')
+st.download_button(
+    label="📥 Download Full Sample Dataset",
+    data=sample_csv,
+    file_name="sample_customer_data.csv",
+    mime='text/csv'
+)
+
+# =========================
+# CACHE FUNCTION
 # =========================
 @st.cache_data
 def load_data(file):
@@ -32,6 +76,16 @@ if file is not None:
         df = load_data(file)
     except Exception as e:
         st.error(f"Error reading file: {e}")
+        st.stop()
+
+    # =========================
+    # VALIDATE COLUMNS
+    # =========================
+    required_columns = ['CustomerID', 'InvoiceNo', 'InvoiceDate', 'Quantity', 'UnitPrice']
+    missing_cols = [col for col in required_columns if col not in df.columns]
+
+    if missing_cols:
+        st.error(f"❌ Missing required columns: {missing_cols}")
         st.stop()
 
     st.subheader("🔹 Raw Data Preview")
@@ -69,7 +123,7 @@ if file is not None:
     st.dataframe(rfm.head())
 
     # =========================
-    # RFM SCORING (1–5)
+    # RFM SCORING
     # =========================
     rfm['R_score'] = pd.qcut(rfm['Recency'], 5, labels=[5,4,3,2,1])
     rfm['F_score'] = pd.qcut(rfm['Frequency'], 5, labels=[1,2,3,4,5])
@@ -112,7 +166,7 @@ if file is not None:
     rfm['Cluster'] = kmeans.fit_predict(rfm_scaled)
 
     # =========================
-    # SEGMENT NAMING (IMPROVED)
+    # SEGMENT NAMING
     # =========================
     def segment_customer(row):
         if row['RFM_Score'] >= 13:
@@ -135,7 +189,7 @@ if file is not None:
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Customers", len(rfm))
-    col2.metric("Average Revenue", round(rfm['Monetary'].mean(),2))
+    col2.metric("Avg Revenue", round(rfm['Monetary'].mean(),2))
     col3.metric("Best K", best_k)
 
     # =========================
@@ -163,7 +217,7 @@ if file is not None:
     st.dataframe(rfm.head())
 
     # =========================
-    # DOWNLOAD
+    # DOWNLOAD RESULT
     # =========================
     csv = rfm.to_csv().encode('utf-8')
     st.download_button("📥 Download Segmented Data", csv, "customer_segments.csv")
