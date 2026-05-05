@@ -12,21 +12,24 @@ st.set_page_config(page_title="Customer Segmentation", layout="wide")
 st.title("📊 Customer Segmentation using RFM & K-Means")
 
 # =========================
-# REQUIRED FORMAT
+# REQUIRED FORMAT DISPLAY
 # =========================
 st.subheader("📋 Required Dataset Format")
+
 st.markdown("""
-- CustomerID → Unique ID  
-- InvoiceNo → Transaction ID  
-- InvoiceDate → Date  
-- Quantity → Items purchased  
-- UnitPrice → Price per item  
+Your dataset must contain the following columns:
+
+- **CustomerID** → Unique ID for each customer  
+- **InvoiceNo** → Transaction ID  
+- **InvoiceDate** → Date of purchase  
+- **Quantity** → Number of items purchased  
+- **UnitPrice** → Price per item  
 """)
 
 # =========================
-# SAMPLE DATA
+# SAMPLE DATASET GENERATION
 # =========================
-st.subheader("📥 Sample Dataset")
+st.subheader("📥 Download Sample Dataset")
 
 @st.cache_data
 def create_sample_data():
@@ -40,13 +43,20 @@ def create_sample_data():
     return pd.DataFrame(data)
 
 sample_df = create_sample_data()
+
+st.write("📌 Example Preview:")
 st.dataframe(sample_df.head())
 
 sample_csv = sample_df.to_csv(index=False).encode('utf-8')
-st.download_button("📥 Download Sample Dataset", sample_csv, "sample_data.csv")
+st.download_button(
+    label="📥 Download Full Sample Dataset",
+    data=sample_csv,
+    file_name="sample_customer_data.csv",
+    mime='text/csv'
+)
 
 # =========================
-# LOAD FUNCTION
+# CACHE FUNCTION
 # =========================
 @st.cache_data
 def load_data(file):
@@ -56,36 +66,42 @@ def load_data(file):
         return pd.read_excel(file)
 
 # =========================
-# UPLOAD
+# FILE UPLOAD
 # =========================
-file = st.file_uploader("Upload your dataset", type=["csv", "xlsx"])
+file = st.file_uploader("Upload your dataset (CSV or Excel)", type=["csv", "xlsx"])
 
 if file is not None:
 
-    df = load_data(file)
-
-    # =========================
-    # VALIDATION
-    # =========================
-    required_cols = ['CustomerID', 'InvoiceNo', 'InvoiceDate', 'Quantity', 'UnitPrice']
-    if any(col not in df.columns for col in required_cols):
-        st.error("❌ Missing required columns")
+    try:
+        df = load_data(file)
+    except Exception as e:
+        st.error(f"Error reading file: {e}")
         st.stop()
 
-    # Optional raw preview
-    if st.checkbox("Show Raw Data"):
-        st.dataframe(df.head())
+    # =========================
+    # VALIDATE COLUMNS
+    # =========================
+    required_columns = ['CustomerID', 'InvoiceNo', 'InvoiceDate', 'Quantity', 'UnitPrice']
+    missing_cols = [col for col in required_columns if col not in df.columns]
+
+    if missing_cols:
+        st.error(f"❌ Missing required columns: {missing_cols}")
+        st.stop()
+
+    st.subheader("🔹 Raw Data Preview")
+    st.dataframe(df.head())
 
     # =========================
     # PREPROCESSING
     # =========================
     df = df.dropna(subset=['CustomerID'])
     df = df[df['Quantity'] > 0]
+
     df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'])
     df['TotalPrice'] = df['Quantity'] * df['UnitPrice']
 
     # =========================
-    # RFM
+    # RFM CALCULATION
     # =========================
     snapshot = df['InvoiceDate'].max()
 
@@ -97,10 +113,14 @@ if file is not None:
 
     rfm.columns = ['Recency', 'Frequency', 'Monetary']
 
+    # Remove outliers
     rfm = rfm[
         (rfm['Monetary'] < rfm['Monetary'].quantile(0.99)) &
         (rfm['Frequency'] < rfm['Frequency'].quantile(0.99))
     ]
+
+    st.subheader("🔹 RFM Table")
+    st.dataframe(rfm.head())
 
     # =========================
     # RFM SCORING
@@ -108,6 +128,7 @@ if file is not None:
     rfm['R_score'] = pd.qcut(rfm['Recency'], 5, labels=[5,4,3,2,1])
     rfm['F_score'] = pd.qcut(rfm['Frequency'], 5, labels=[1,2,3,4,5])
     rfm['M_score'] = pd.qcut(rfm['Monetary'], 5, labels=[1,2,3,4,5])
+
     rfm['RFM_Score'] = rfm[['R_score','F_score','M_score']].astype(int).sum(axis=1)
 
     # =========================
@@ -117,10 +138,13 @@ if file is not None:
     rfm_scaled = scaler.fit_transform(rfm[['Recency','Frequency','Monetary']])
 
     # =========================
-    # BEST K
+    # AUTO SELECT BEST K
     # =========================
+    st.subheader("🔹 Silhouette Scores")
+
     scores = {}
-    best_k, best_score = 2, -1
+    best_k = 2
+    best_score = -1
 
     for k in range(2, 8):
         km = KMeans(n_clusters=k, random_state=42, n_init=10)
@@ -129,10 +153,11 @@ if file is not None:
         scores[k] = score
 
         if score > best_score:
-            best_k, best_score = k, score
+            best_score = score
+            best_k = k
 
-    st.write("Silhouette Scores:", scores)
-    st.success(f"Best K: {best_k}")
+    st.write(scores)
+    st.success(f"✅ Best K selected: {best_k}")
 
     # =========================
     # FINAL MODEL
@@ -141,88 +166,61 @@ if file is not None:
     rfm['Cluster'] = kmeans.fit_predict(rfm_scaled)
 
     # =========================
-    # SEGMENTATION
+    # SEGMENT NAMING
     # =========================
-    def segment(row):
+    def segment_customer(row):
         if row['RFM_Score'] >= 13:
-            return "Champions"
+            return "🌟 Champions"
         elif row['RFM_Score'] >= 10:
-            return "Loyal"
+            return "💎 Loyal Customers"
         elif row['RFM_Score'] >= 7:
-            return "Potential"
+            return "🙂 Potential Loyalists"
         elif row['RFM_Score'] >= 5:
-            return "At Risk"
+            return "⚠️ At Risk"
         else:
-            return "Lost"
+            return "❌ Lost Customers"
 
-    rfm['Segment'] = rfm.apply(segment, axis=1)
-
-    # =========================
-    # SIDEBAR FILTERS
-    # =========================
-    st.sidebar.header("🔍 Filters")
-
-    seg_filter = st.sidebar.multiselect(
-        "Segment",
-        rfm['Segment'].unique(),
-        default=rfm['Segment'].unique()
-    )
-
-    cluster_filter = st.sidebar.multiselect(
-        "Cluster",
-        sorted(rfm['Cluster'].unique()),
-        default=sorted(rfm['Cluster'].unique())
-    )
-
-    score_range = st.sidebar.slider(
-        "RFM Score",
-        int(rfm['RFM_Score'].min()),
-        int(rfm['RFM_Score'].max()),
-        (int(rfm['RFM_Score'].min()), int(rfm['RFM_Score'].max()))
-    )
-
-    # Apply filters
-    filtered = rfm[
-        (rfm['Segment'].isin(seg_filter)) &
-        (rfm['Cluster'].isin(cluster_filter)) &
-        (rfm['RFM_Score'] >= score_range[0]) &
-        (rfm['RFM_Score'] <= score_range[1])
-    ]
+    rfm['Segment'] = rfm.apply(segment_customer, axis=1)
 
     # =========================
     # METRICS
     # =========================
+    st.subheader("📌 Key Metrics")
+
     col1, col2, col3 = st.columns(3)
-    col1.metric("Customers", len(filtered))
-    col2.metric("Avg Revenue", round(filtered['Monetary'].mean(),2))
-    col3.metric("Clusters", best_k)
+    col1.metric("Total Customers", len(rfm))
+    col2.metric("Avg Revenue", round(rfm['Monetary'].mean(),2))
+    col3.metric("Best K", best_k)
 
     # =========================
-    # VISUALS
+    # VISUALIZATIONS
     # =========================
-    st.subheader("📊 Insights")
+    st.subheader("📊 Visual Insights")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.bar_chart(filtered['Cluster'].value_counts())
+        st.write("Cluster Distribution")
+        st.bar_chart(rfm['Cluster'].value_counts())
 
     with col2:
-        st.bar_chart(filtered['Segment'].value_counts())
+        st.write("Segment Distribution")
+        st.bar_chart(rfm['Segment'].value_counts())
 
-    st.bar_chart(filtered['RFM_Score'].value_counts())
-
-    # =========================
-    # OUTPUT
-    # =========================
-    st.subheader("🔹 Filtered Data")
-    st.dataframe(filtered.head())
+    st.write("RFM Score Distribution")
+    st.bar_chart(rfm['RFM_Score'].value_counts())
 
     # =========================
-    # DOWNLOAD
+    # FINAL OUTPUT
     # =========================
-    csv = filtered.to_csv().encode('utf-8')
-    st.download_button("📥 Download Filtered Data", csv, "filtered_customers.csv")
+    st.subheader("🔹 Final Segmented Data")
+    st.dataframe(rfm.head())
+
+    # =========================
+    # DOWNLOAD RESULT
+    # =========================
+    csv = rfm.to_csv().encode('utf-8')
+    st.download_button("📥 Download Segmented Data", csv, "customer_segments.csv")
 
 else:
-    st.info("Upload a dataset to start.")
+    st.info("Please upload a dataset to begin.")
