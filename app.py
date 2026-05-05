@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
 
 # =========================
 # PAGE CONFIG
@@ -108,33 +107,13 @@ if file is not None:
     rfm_scaled = scaler.fit_transform(rfm[['Recency','Frequency','Monetary']])
 
     # =========================
-    # FIND BEST K
+    # FIXED K = 4
     # =========================
-    scores = {}
-    best_k = 2
-    best_score = -1
-
-    for k in range(2, 8):
-        km = KMeans(n_clusters=k, random_state=42, n_init=10)
-        labels = km.fit_predict(rfm_scaled)
-        score = silhouette_score(rfm_scaled, labels)
-        scores[k] = score
-
-        if score > best_score:
-            best_score = score
-            best_k = k
-
-    st.write("Silhouette Scores:", scores)
-    st.success(f"Best K: {best_k}")
-
-    # =========================
-    # FINAL MODEL
-    # =========================
-    kmeans = KMeans(n_clusters=best_k, random_state=42, n_init=10)
+    kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
     rfm['Cluster'] = kmeans.fit_predict(rfm_scaled)
 
     # =========================
-    # FINAL SEGMENTATION (YOUR REQUIREMENT)
+    # SEGMENTATION
     # =========================
     def segment_customer(row):
 
@@ -157,25 +136,17 @@ if file is not None:
     # =========================
     st.subheader("📌 Key Metrics")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     col1.metric("Total Customers", len(rfm))
     col2.metric("Avg Revenue", round(rfm['Monetary'].mean(),2))
-    col3.metric("Best K", best_k)
 
     # =========================
-    # VISUALS
+    # VISUALS (ONLY SEGMENT GRAPH)
     # =========================
     st.subheader("📊 Visual Insights")
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.write("Cluster Distribution")
-        st.bar_chart(rfm['Cluster'].value_counts())
-
-    with col2:
-        st.write("Segment Distribution")
-        st.bar_chart(rfm['Segment'].value_counts())
+    st.write("Segment Distribution")
+    st.bar_chart(rfm['Segment'].value_counts())
 
     st.write("RFM Score Distribution")
     st.bar_chart(rfm['RFM_Score'].value_counts())
