@@ -42,34 +42,21 @@ sample_df = create_sample_data()
 st.dataframe(sample_df.head())
 
 # =========================
-# FILE UPLOAD
+# MAIN PROCESSING (CACHED)
 # =========================
-file = st.file_uploader("Upload dataset", type=["csv", "xlsx"])
+@st.cache_data
+def process_data(df):
 
-if file is not None:
+    df = df.copy()
 
-    df = pd.read_csv(file, encoding='ISO-8859-1') if file.name.endswith('.csv') else pd.read_excel(file)
-
-    # =========================
-    # VALIDATION
-    # =========================
-    required_columns = ['CustomerID', 'InvoiceNo', 'InvoiceDate', 'Quantity', 'UnitPrice']
-    if not all(col in df.columns for col in required_columns):
-        st.error("Missing required columns!")
-        st.stop()
-
-    # =========================
     # PREPROCESSING
-    # =========================
     df = df.dropna(subset=['CustomerID'])
     df = df[df['Quantity'] > 0]
 
     df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'])
     df['TotalPrice'] = df['Quantity'] * df['UnitPrice']
 
-    # =========================
     # RFM CALCULATION
-    # =========================
     snapshot = df['InvoiceDate'].max()
 
     rfm = df.groupby('CustomerID').agg({
@@ -80,86 +67,89 @@ if file is not None:
 
     rfm.columns = ['Recency', 'Frequency', 'Monetary']
 
-    # =========================
     # REMOVE OUTLIERS
-    # =========================
     rfm = rfm[
         (rfm['Monetary'] < rfm['Monetary'].quantile(0.99)) &
         (rfm['Frequency'] < rfm['Frequency'].quantile(0.99))
     ]
 
-    st.subheader("🔹 RFM Table")
-    st.dataframe(rfm.head())
-
-    # =========================
     # RFM SCORING
-    # =========================
     rfm['R_score'] = pd.qcut(rfm['Recency'], 5, labels=[5,4,3,2,1])
     rfm['F_score'] = pd.qcut(rfm['Frequency'], 5, labels=[1,2,3,4,5])
     rfm['M_score'] = pd.qcut(rfm['Monetary'], 5, labels=[1,2,3,4,5])
 
     rfm['RFM_Score'] = rfm[['R_score','F_score','M_score']].astype(int).sum(axis=1)
 
-    # =========================
     # SCALING
-    # =========================
     scaler = StandardScaler()
     rfm_scaled = scaler.fit_transform(rfm[['Recency','Frequency','Monetary']])
 
-    # =========================
-    # FIXED K = 4
-    # =========================
+    # KMEANS
     kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
     rfm['Cluster'] = kmeans.fit_predict(rfm_scaled)
 
     # =========================
-    # SEGMENTATION
+    # FAST SEGMENTATION (vectorized)
     # =========================
-    def segment_customer(row):
+    rfm['Segment'] = np.select(
+        [
+            rfm['RFM_Score'] >= 13,
+            rfm['RFM_Score'] >= 9,
+            rfm['RFM_Score'] >= 5
+        ],
+        [
+            "Loyal High-Spenders",
+            "Regular Customers",
+            "New/Occasional Customers"
+        ],
+        default="At-Risk Infrequents"
+    )
 
-        if row['RFM_Score'] >= 13:
-            return "Loyal High-Spenders"
+    return rfm
 
-        elif row['RFM_Score'] >= 9:
-            return "Regular Customers"
+# =========================
+# FILE UPLOAD
+# =========================
+file = st.file_uploader("Upload dataset", type=["csv", "xlsx"])
 
-        elif row['RFM_Score'] >= 5:
-            return "New/Occasional Customers"
+if file is not None:
 
-        else:
-            return "At-Risk Infrequents"
+    df = pd.read_csv(file, encoding='ISO-8859-1') if file.name.endswith('.csv') else pd.read_excel(file)
 
-    rfm['Segment'] = rfm.apply(segment_customer, axis=1)
+    # VALIDATION
+    required_columns = ['CustomerID', 'InvoiceNo', 'InvoiceDate', 'Quantity', 'UnitPrice']
+    if not all(col in df.columns for col in required_columns):
+        st.error("Missing required columns!")
+        st.stop()
 
     # =========================
-    # METRICS
+    # SPINNER + PROCESSING
     # =========================
+    with st.spinner("⏳ Processing data, please wait..."):
+        rfm = process_data(df)
+
+    # =========================
+    # OUTPUTS
+    # =========================
+    st.subheader("🔹 RFM Table")
+    st.dataframe(rfm.head())
+
     st.subheader("📌 Key Metrics")
-
     col1, col2 = st.columns(2)
     col1.metric("Total Customers", len(rfm))
     col2.metric("Avg Revenue", round(rfm['Monetary'].mean(),2))
 
-    # =========================
-    # VISUALS (ONLY SEGMENT GRAPH)
-    # =========================
     st.subheader("📊 Visual Insights")
-
     st.write("Segment Distribution")
     st.bar_chart(rfm['Segment'].value_counts())
 
     st.write("RFM Score Distribution")
     st.bar_chart(rfm['RFM_Score'].value_counts())
 
-    # =========================
-    # FINAL OUTPUT
-    # =========================
     st.subheader("🔹 Final Segmented Data")
     st.dataframe(rfm.head())
 
-    # =========================
     # DOWNLOAD
-    # =========================
     csv = rfm.to_csv().encode('utf-8')
     st.download_button("Download CSV", csv, "customer_segments.csv")
 
